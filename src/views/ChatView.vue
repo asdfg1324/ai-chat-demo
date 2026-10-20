@@ -10,16 +10,45 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const ragEnabled = ref(chatStore.ragEnabled)
 const messageContainer = ref<HTMLElement | null>(null)
+const messageContent = ref<HTMLElement | null>(null)
 const { visibleItems, totalHeight, offsetY, bottomOffset, useVirtual, measureItem } = useVirtualScroll(
   () => chatStore.messages,
   () => messageContainer.value
 )
 
-onMounted(() => {
+let contentObserver: ResizeObserver | undefined
+const followLatest = ref(true)
+
+async function scrollToLatest() {
+  await nextTick()
+  const container = messageContainer.value
+  if (!container) return
+  container.scrollTop = container.scrollHeight
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  container.scrollTop = container.scrollHeight
+}
+
+function updateFollowState() {
+  const container = messageContainer.value
+  if (container) {
+    followLatest.value = container.scrollHeight - container.scrollTop - container.clientHeight < 120
+  }
+}
+
+onMounted(async () => {
   const active = sessionStore.sessions.find(session => session.id === sessionStore.activeId)
   chatStore.messages = active
     ? active.messages.map(message => ({ ...message, isStreaming: false }))
     : []
+  await nextTick()
+  if (typeof ResizeObserver !== 'undefined') {
+    contentObserver = new ResizeObserver(() => {
+      if (followLatest.value) void scrollToLatest()
+    })
+    if (messageContent.value) contentObserver.observe(messageContent.value)
+  }
+  followLatest.value = true
+  await scrollToLatest()
 })
 
 let persistTimer: ReturnType<typeof setTimeout> | undefined
@@ -42,11 +71,21 @@ watch(
 
 watch(
   () => chatStore.messages.map(message => message.content).join('\u0000'),
-  async () => {
-    await nextTick()
-    const container = messageContainer.value
-    if (container && container.scrollHeight - container.scrollTop - container.clientHeight < 220) {
-      container.scrollTop = container.scrollHeight
+  () => {
+    if (followLatest.value) void scrollToLatest()
+  },
+  { flush: 'post' }
+)
+
+watch(
+  () => chatStore.messages.length,
+  (length, previousLength) => {
+    if (messageContent.value && contentObserver) {
+      contentObserver.observe(messageContent.value)
+    }
+    if (length > previousLength && chatStore.isStreaming) {
+      followLatest.value = true
+      void scrollToLatest()
     }
   },
   { flush: 'post' }
@@ -54,6 +93,7 @@ watch(
 
 onBeforeUnmount(() => {
   if (persistTimer) clearTimeout(persistTimer)
+  contentObserver?.disconnect()
   if (sessionStore.activeId) {
     sessionStore.updateMessages(sessionStore.activeId, chatStore.messages)
   }
@@ -89,7 +129,7 @@ const toggleRag = (val: boolean) => {
     </header>
 
     <!-- 欢迎态 / 消息区 -->
-    <main ref="messageContainer" class="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-50/70 via-slate-50 to-slate-100/70 px-[18px] py-6 sm:px-[34px] sm:py-10">
+    <main ref="messageContainer" @scroll="updateFollowState" class="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-50/70 via-slate-50 to-slate-100/70 px-[18px] py-6 sm:px-[34px] sm:py-10">
       <div v-if="chatStore.messages.length === 0" class="mx-auto mt-4 w-full text-center sm:mt-10">
         <div class="welcome-mark mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl shadow-lg shadow-blue-100 ring-1 ring-slate-200/80">✦</div>
         <p class="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-blue-600">你的 AI 助手已就绪</p>
@@ -116,7 +156,7 @@ const toggleRag = (val: boolean) => {
           当前使用本地模拟数据，天气、回复和工具结果用于演示交互流程
         </p>
       </div>
-      <div v-else class="w-full">
+      <div v-else ref="messageContent" class="w-full">
         <div v-if="useVirtual" :style="{ height: `${offsetY}px` }"></div>
         <div>
           <div v-for="message in visibleItems" :key="message.id" :ref="(element) => measureItem(element, message._vIndex)" class="pb-5">
