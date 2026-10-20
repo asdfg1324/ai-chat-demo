@@ -120,6 +120,19 @@ const toggleRag = (val: boolean) => {
         </div>
         <span v-if="chatStore.isDemoMode" class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 sm:text-[11px]">本地演示</span>
         <span class="hidden h-7 w-px bg-slate-200 sm:block"></span>
+        <label
+          :title="chatStore.hasApiKey ? '切换阿里云 AI 与本地演示模式' : '请先在 .env.local 配置 VITE_API_KEY 并重启开发服务器'"
+          class="flex cursor-pointer select-none items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50"
+        >
+          <input
+            type="checkbox"
+            :checked="chatStore.cloudEnabled"
+            :disabled="!chatStore.hasApiKey"
+            @change="chatStore.setCloudEnabled(($event.target as HTMLInputElement).checked)"
+            class="accent-blue-600"
+          >
+          <span>阿里云 AI</span>
+        </label>
         <label class="flex cursor-pointer select-none items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50">
           <input type="checkbox" :checked="ragEnabled" @change="toggleRag(($event.target as HTMLInputElement).checked)" class="accent-blue-600">
           <span>知识库检索</span>

@@ -7,7 +7,7 @@ import { searchKnowledge, buildRagContext } from '@/utils/rag'
 const API_KEY = import.meta.env.VITE_API_KEY || ''
 const BASE_URL = import.meta.env.VITE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const MODEL = import.meta.env.VITE_MODEL || 'qwen-plus'
-const DEMO_MODE = !API_KEY
+const HAS_API_KEY = Boolean(API_KEY)
 const REQUEST_TIMEOUT_MS = 60_000
 // =============================
 
@@ -172,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<any[]>([])
   const isLoading = ref(false)
   const isStreaming = ref(false)
+  const cloudEnabled = ref(HAS_API_KEY)
   const ragEnabled = ref(false)
   const lastRagResults = ref<any[]>([])
   const tokenUsage = computed(() =>
@@ -207,6 +208,10 @@ export const useChatStore = defineStore('chat', () => {
   // ---- Actions ----
   function setRagEnabled(val: boolean) {
     ragEnabled.value = val
+  }
+
+  function setCloudEnabled(val: boolean) {
+    if (HAS_API_KEY) cloudEnabled.value = val
   }
 
   function toggleRag() {
@@ -276,7 +281,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 4. 本地兜底：检测是否需要工具调用
-    const localTools = DEMO_MODE ? localDecideTools(text, context) : []
+    const localTools = !cloudEnabled.value ? localDecideTools(text, context) : []
 
     // 5. 添加助手占位消息
     const assistantMsg = retryAssistantMsg || reactive({
@@ -332,7 +337,7 @@ export const useChatStore = defineStore('chat', () => {
           })
 
           // 执行工具
-          await executeTool(assistantMsg.toolCalls[assistantMsg.toolCalls.length - 1], DEMO_MODE)
+          await executeTool(assistantMsg.toolCalls[assistantMsg.toolCalls.length - 1], !cloudEnabled.value)
 
           // 将工具结果作为消息传给模型
           apiMessages.push({
@@ -344,7 +349,7 @@ export const useChatStore = defineStore('chat', () => {
               : `工具执行失败: ${tc.result?.error || '未知错误'}`
           })
         }
-        if (!DEMO_MODE) {
+        if (cloudEnabled.value) {
           apiMessages.splice(apiMessages.length - localTools.length, 0, {
             role: 'assistant',
             content: null,
@@ -353,14 +358,14 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         // 重新请求模型，带上工具结果
-        if (DEMO_MODE) {
+        if (!cloudEnabled.value) {
           const reply = createDemoReply(text, context, lastRagResults.value, assistantMsg.toolCalls)
           await streamDemoReply(reply, assistantMsg, context.length)
         } else {
           await streamCompletion(apiMessages, assistantMsg, startTime)
         }
       } else {
-        if (DEMO_MODE) {
+        if (!cloudEnabled.value) {
           const reply = createDemoReply(text, context, lastRagResults.value, assistantMsg.toolCalls)
           await streamDemoReply(reply, assistantMsg, context.length)
         } else {
@@ -599,12 +604,15 @@ export const useChatStore = defineStore('chat', () => {
     totalTokens,
     lastResponseTime,
     errorMsg,
-    isDemoMode: DEMO_MODE,
+    cloudEnabled,
+    hasApiKey: HAS_API_KEY,
+    isDemoMode: computed(() => !cloudEnabled.value),
     // actions
     send,
     retry,
     clear,
     setRagEnabled,
+    setCloudEnabled,
     toggleRag
   }
 })
